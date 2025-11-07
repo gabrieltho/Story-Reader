@@ -1,8 +1,14 @@
-// Novel Reader App Logic - Enhanced with Multiple Format Support
+// Novel Reader App - Enhanced with Chapter Navigation & Progress Tracking
 class NovelReader {
     constructor() {
         this.novelText = '';
         this.fileName = '';
+        this.chapters = [];
+        this.currentChapterIndex = 0;
+        this.currentPage = 0;
+        this.pagesPerChapter = [];
+        this.wordsPerPage = 400; // Adjustable
+        
         this.sentences = [];
         this.currentSentenceIndex = 0;
         this.isReading = false;
@@ -12,6 +18,7 @@ class NovelReader {
         this.synth = window.speechSynthesis;
         this.voices = [];
         this.currentUtterance = null;
+        this.filteredVoices = [];
         
         // Settings
         this.speed = 1.0;
@@ -23,10 +30,10 @@ class NovelReader {
         this.initializeVoices();
         this.attachEventListeners();
         this.initializePDFJS();
+        this.loadSavedProgress();
     }
 
     initializePDFJS() {
-        // Set PDF.js worker
         if (typeof pdfjsLib !== 'undefined') {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
@@ -38,6 +45,17 @@ class NovelReader {
         this.textDisplay = document.getElementById('textDisplay');
         this.controlsSection = document.getElementById('controlsSection');
         this.fileNameDisplay = document.getElementById('fileName');
+        
+        // Reader elements
+        this.chapterNav = document.getElementById('chapterNav');
+        this.chapterSelect = document.getElementById('chapterSelect');
+        this.prevChapterBtn = document.getElementById('prevChapterBtn');
+        this.nextChapterBtn = document.getElementById('nextChapterBtn');
+        this.readerContent = document.getElementById('readerContent');
+        this.pageNav = document.getElementById('pageNav');
+        this.pageInfo = document.getElementById('pageInfo');
+        this.prevPageBtn = document.getElementById('prevPageBtn');
+        this.nextPageBtn = document.getElementById('nextPageBtn');
         
         // Buttons
         this.playBtn = document.getElementById('playBtn');
@@ -83,7 +101,6 @@ class NovelReader {
     populateVoiceList() {
         this.voiceSelect.innerHTML = '';
         
-        // Filter for English voices
         let englishVoices = this.voices.filter(voice => 
             voice.lang.startsWith('en')
         );
@@ -93,7 +110,6 @@ class NovelReader {
             return;
         }
 
-        // Prioritize high-quality voices
         const qualityVoices = this.selectBestVoices(englishVoices);
         
         qualityVoices.forEach((voice, index) => {
@@ -104,26 +120,21 @@ class NovelReader {
             this.voiceSelect.appendChild(option);
         });
 
-        // Store filtered voices for selection
         this.filteredVoices = qualityVoices;
 
-        // Select first voice by default
         if (qualityVoices.length > 0) {
             this.selectedVoice = qualityVoices[0];
         }
     }
 
     selectBestVoices(voices) {
-        // List of known high-quality voice names (prioritized)
         const premiumVoices = [
             'Samantha', 'Alex', 'Victoria', 'Karen', 'Daniel', 'Moira',
             'Fiona', 'Tessa', 'Ava', 'Nicky', 'Susan', 'Zoe',
             'Google US English', 'Google UK English Female', 'Google UK English Male',
-            'Microsoft David', 'Microsoft Zira', 'Microsoft Mark',
-            'Siri Female', 'Siri Male'
+            'Microsoft David', 'Microsoft Zira', 'Microsoft Mark'
         ];
 
-        // First, try to get premium voices
         let selectedVoices = [];
         
         premiumVoices.forEach(premiumName => {
@@ -133,28 +144,15 @@ class NovelReader {
             }
         });
 
-        // If we don't have enough, add other English voices
         if (selectedVoices.length < 8) {
             const remaining = voices.filter(v => !selectedVoices.includes(v));
-            
-            // Prefer voices that don't have "compact" or "premium" in name (compact = lower quality)
             const betterRemaining = remaining.filter(v => 
-                !v.name.toLowerCase().includes('compact') &&
-                !v.name.toLowerCase().includes('premium')
+                !v.name.toLowerCase().includes('compact')
             );
-            
             const toAdd = betterRemaining.slice(0, 8 - selectedVoices.length);
             selectedVoices = [...selectedVoices, ...toAdd];
         }
 
-        // If still not enough, just take what we have
-        if (selectedVoices.length < 8) {
-            const needed = 8 - selectedVoices.length;
-            const remaining = voices.filter(v => !selectedVoices.includes(v));
-            selectedVoices = [...selectedVoices, ...remaining.slice(0, needed)];
-        }
-
-        // Try to balance male and female voices
         return this.balanceGenders(selectedVoices.slice(0, 8));
     }
 
@@ -166,49 +164,25 @@ class NovelReader {
         voices.forEach(voice => {
             const name = voice.name.toLowerCase();
             
-            // Female indicators
-            if (name.includes('female') || name.includes('woman') ||
-                name.includes('samantha') || name.includes('victoria') || 
-                name.includes('karen') || name.includes('fiona') ||
-                name.includes('moira') || name.includes('zoe') ||
-                name.includes('susan') || name.includes('ava') ||
-                name.includes('tessa') || name.includes('zira')) {
+            if (name.includes('female') || name.includes('samantha') || 
+                name.includes('victoria') || name.includes('karen') ||
+                name.includes('zira') || name.includes('moira')) {
                 females.push(voice);
-            }
-            // Male indicators
-            else if (name.includes('male') || name.includes('man') ||
-                     name.includes('alex') || name.includes('daniel') ||
-                     name.includes('david') || name.includes('mark') ||
-                     name.includes('tom') || name.includes('james')) {
+            } else if (name.includes('male') || name.includes('alex') || 
+                       name.includes('daniel') || name.includes('david')) {
                 males.push(voice);
-            }
-            else {
+            } else {
                 unknown.push(voice);
             }
         });
 
-        // Try to get 4 female, 4 male
         const balanced = [
             ...females.slice(0, 4),
             ...males.slice(0, 4)
         ];
 
-        // Fill remaining slots with unknowns if needed
         while (balanced.length < 8 && unknown.length > 0) {
             balanced.push(unknown.shift());
-        }
-
-        // If still not 8, add remaining from any category
-        while (balanced.length < 8) {
-            if (females.length > balanced.filter(v => females.includes(v)).length) {
-                balanced.push(females[balanced.filter(v => females.includes(v)).length]);
-            } else if (males.length > balanced.filter(v => males.includes(v)).length) {
-                balanced.push(males[balanced.filter(v => males.includes(v)).length]);
-            } else if (unknown.length > 0) {
-                balanced.push(unknown.shift());
-            } else {
-                break;
-            }
         }
 
         return balanced.slice(0, 8);
@@ -217,20 +191,16 @@ class NovelReader {
     guessVoiceGender(name) {
         const nameLower = name.toLowerCase();
         
-        if (nameLower.includes('female') || nameLower.includes('woman') ||
-            nameLower.includes('samantha') || nameLower.includes('victoria') || 
-            nameLower.includes('karen') || nameLower.includes('fiona') ||
-            nameLower.includes('moira') || nameLower.includes('zoe') ||
-            nameLower.includes('susan') || nameLower.includes('ava') ||
-            nameLower.includes('tessa') || nameLower.includes('zira')) {
+        if (nameLower.includes('female') || nameLower.includes('samantha') || 
+            nameLower.includes('victoria') || nameLower.includes('karen') ||
+            nameLower.includes('zira')) {
             return '(Female)';
-        } else if (nameLower.includes('male') || nameLower.includes('man') ||
-                   nameLower.includes('alex') || nameLower.includes('daniel') ||
-                   nameLower.includes('david') || nameLower.includes('mark')) {
+        } else if (nameLower.includes('male') || nameLower.includes('alex') || 
+                   nameLower.includes('daniel') || nameLower.includes('david')) {
             return '(Male)';
         }
         
-        return ''; // Unknown
+        return '';
     }
 
     attachEventListeners() {
@@ -245,6 +215,15 @@ class NovelReader {
         this.changeFileBtn.addEventListener('click', () => this.showImportSection());
         this.pasteBtn.addEventListener('click', () => this.showPasteModal());
         this.sampleBtn.addEventListener('click', () => this.loadSample());
+        
+        // Chapter navigation
+        this.prevChapterBtn.addEventListener('click', () => this.previousChapter());
+        this.nextChapterBtn.addEventListener('click', () => this.nextChapter());
+        this.chapterSelect.addEventListener('change', (e) => this.goToChapter(parseInt(e.target.value)));
+        
+        // Page navigation
+        this.prevPageBtn.addEventListener('click', () => this.previousPage());
+        this.nextPageBtn.addEventListener('click', () => this.nextPage());
         
         // Modal
         this.closeModal.addEventListener('click', () => this.hidePasteModal());
@@ -267,7 +246,6 @@ class NovelReader {
         });
         
         this.voiceSelect.addEventListener('change', (e) => {
-            // Use filtered voices array
             const voices = this.filteredVoices || this.voices.filter(voice => 
                 voice.lang.startsWith('en')
             );
@@ -298,217 +276,116 @@ class NovelReader {
 
     async extractTextFromFile(file) {
         const extension = file.name.split('.').pop().toLowerCase();
-
         this.progressText.textContent = `Processing ${extension.toUpperCase()} file...`;
 
         switch (extension) {
             case 'txt':
             case 'text':
-                return await this.extractTextFromTXT(file);
-            
+                return await file.text();
             case 'pdf':
                 return await this.extractTextFromPDF(file);
-            
             case 'epub':
                 return await this.extractTextFromEPUB(file);
-            
             case 'docx':
                 return await this.extractTextFromDOCX(file);
-            
-            case 'doc':
-                alert('DOC format is not fully supported. Please convert to DOCX or TXT format.');
-                return '';
-            
             case 'rtf':
                 return await this.extractTextFromRTF(file);
-            
-            case 'mobi':
-                alert('MOBI format requires conversion. Please convert to EPUB or TXT format using Calibre or an online converter.');
-                return '';
-            
             default:
-                // Try to read as plain text
-                return await this.extractTextFromTXT(file);
-        }
-    }
-
-    async extractTextFromTXT(file) {
-        try {
-            return await file.text();
-        } catch (error) {
-            throw new Error('Could not read text file: ' + error.message);
+                return await file.text();
         }
     }
 
     async extractTextFromPDF(file) {
         if (typeof pdfjsLib === 'undefined') {
-            throw new Error('PDF library not loaded. Please refresh the page and try again.');
+            throw new Error('PDF library not loaded');
         }
 
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-            const pdf = await loadingTask.promise;
-            
-            let fullText = '';
-            const numPages = pdf.numPages;
-
-            for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-                this.progressText.textContent = `Processing PDF: page ${pageNum} of ${numPages}...`;
-                const page = await pdf.getPage(pageNum);
-                const textContent = await page.getTextContent();
-                const pageText = textContent.items.map(item => item.str).join(' ');
-                fullText += pageText + '\n\n';
-            }
-
-            if (fullText.trim().length === 0) {
-                throw new Error('No text found in PDF. The PDF might be image-based or encrypted.');
-            }
-
-            return fullText;
-        } catch (error) {
-            throw new Error('PDF extraction failed: ' + error.message);
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise();
+        
+        let fullText = '';
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            this.progressText.textContent = `Processing PDF: page ${pageNum} of ${pdf.numPages}...`;
+            const page = await pdf.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(' ');
+            fullText += pageText + '\n\n';
         }
+
+        return fullText;
     }
 
     async extractTextFromEPUB(file) {
         if (typeof JSZip === 'undefined') {
-            throw new Error('EPUB library not loaded. Please refresh the page and try again.');
+            throw new Error('EPUB library not loaded');
         }
 
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const zip = await JSZip.loadAsync(arrayBuffer);
-            
-            let fullText = '';
-            const htmlFiles = [];
+        const arrayBuffer = await file.arrayBuffer();
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        
+        let fullText = '';
+        const htmlFiles = [];
 
-            // Find all HTML/XHTML files
-            zip.forEach((relativePath, zipEntry) => {
-                if (relativePath.match(/\.(html|xhtml|htm)$/i) && !zipEntry.dir) {
-                    htmlFiles.push(relativePath);
-                }
-            });
-
-            // Sort files to maintain reading order (roughly)
-            htmlFiles.sort();
-
-            // Extract text from each HTML file
-            for (const fileName of htmlFiles) {
-                this.progressText.textContent = `Processing EPUB: ${htmlFiles.indexOf(fileName) + 1} of ${htmlFiles.length} sections...`;
-                const content = await zip.file(fileName).async('string');
-                const plainText = this.stripHTML(content);
-                fullText += plainText + '\n\n';
+        zip.forEach((relativePath, zipEntry) => {
+            if (relativePath.match(/\.(html|xhtml|htm)$/i) && !zipEntry.dir) {
+                htmlFiles.push(relativePath);
             }
+        });
 
-            if (fullText.trim().length === 0) {
-                throw new Error('No readable content found in EPUB file.');
-            }
+        htmlFiles.sort();
 
-            return fullText;
-        } catch (error) {
-            throw new Error('EPUB extraction failed: ' + error.message);
+        for (const fileName of htmlFiles) {
+            const content = await zip.file(fileName).async('string');
+            const plainText = this.stripHTML(content);
+            fullText += plainText + '\n\n';
         }
+
+        return fullText;
     }
 
     async extractTextFromDOCX(file) {
         if (typeof JSZip === 'undefined') {
-            throw new Error('DOCX library not loaded. Please refresh the page and try again.');
+            throw new Error('DOCX library not loaded');
         }
 
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const zip = await JSZip.loadAsync(arrayBuffer);
-            
-            // Get document.xml which contains the main text
-            const documentXML = await zip.file('word/document.xml').async('string');
-            
-            if (!documentXML) {
-                throw new Error('Invalid DOCX file structure.');
-            }
-
-            const plainText = this.extractTextFromXML(documentXML);
-
-            if (plainText.trim().length === 0) {
-                throw new Error('No text found in DOCX file.');
-            }
-
-            return plainText;
-        } catch (error) {
-            throw new Error('DOCX extraction failed: ' + error.message);
-        }
+        const arrayBuffer = await file.arrayBuffer();
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        const documentXML = await zip.file('word/document.xml').async('string');
+        return this.extractTextFromXML(documentXML);
     }
 
     async extractTextFromRTF(file) {
-        try {
-            const text = await file.text();
-            
-            // Basic RTF to plain text conversion
-            let plainText = text;
-            
-            // Remove RTF header
-            plainText = plainText.replace(/^{\\rtf.*?\\viewkind\d+/s, '');
-            
-            // Remove RTF control words
-            plainText = plainText.replace(/\\[a-z]+\d*\s?/g, ' ');
-            
-            // Remove curly braces
-            plainText = plainText.replace(/[{}]/g, '');
-            
-            // Clean up whitespace
-            plainText = plainText.replace(/\s+/g, ' ');
-            plainText = plainText.trim();
-
-            if (plainText.length === 0) {
-                throw new Error('No text found in RTF file. Try converting to TXT or DOCX format.');
-            }
-
-            return plainText;
-        } catch (error) {
-            throw new Error('RTF extraction failed: ' + error.message);
-        }
+        let text = await file.text();
+        text = text.replace(/^{\\rtf.*?\\viewkind\d+/s, '');
+        text = text.replace(/\\[a-z]+\d*\s?/g, ' ');
+        text = text.replace(/[{}]/g, '');
+        text = text.replace(/\s+/g, ' ');
+        return text.trim();
     }
 
     stripHTML(html) {
         let result = html;
-        
-        // Remove scripts and styles
         result = result.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
         result = result.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-        
-        // Remove HTML tags
         result = result.replace(/<[^>]+>/g, ' ');
-        
-        // Decode common HTML entities
         result = result.replace(/&nbsp;/g, ' ');
         result = result.replace(/&lt;/g, '<');
         result = result.replace(/&gt;/g, '>');
         result = result.replace(/&amp;/g, '&');
         result = result.replace(/&quot;/g, '"');
         result = result.replace(/&#39;/g, "'");
-        result = result.replace(/&apos;/g, "'");
-        
-        // Clean up whitespace
         result = result.replace(/[ \t]+/g, ' ');
         result = result.replace(/\n\s*\n/g, '\n\n');
-        
         return result.trim();
     }
 
     extractTextFromXML(xml) {
         let result = '';
-        
-        // Extract text from <w:t> tags (Word text tags)
         const pattern = /<w:t[^>]*>([^<]+)<\/w:t>/g;
         let match;
         
         while ((match = pattern.exec(xml)) !== null) {
-            result += match[1] + ' ';
-        }
-        
-        // Also try to extract from <text> tags (generic XML)
-        const textPattern = /<text[^>]*>([^<]+)<\/text>/g;
-        while ((match = textPattern.exec(xml)) !== null) {
             result += match[1] + ' ';
         }
         
@@ -523,15 +400,210 @@ class NovelReader {
 
         this.novelText = text;
         this.fileName = filename;
+        
+        // Detect and split chapters
+        this.detectChapters(text);
+        
+        // Split into sentences for speech
         this.sentences = this.splitIntoSentences(text);
         this.currentSentenceIndex = 0;
         
+        // Load saved progress if available
+        const saved = this.getSavedProgress(filename);
+        if (saved) {
+            this.currentChapterIndex = saved.chapter;
+            this.currentPage = saved.page;
+        } else {
+            this.currentChapterIndex = 0;
+            this.currentPage = 0;
+        }
+        
         this.showTextDisplay();
+        this.renderCurrentPage();
         this.updateProgress();
     }
 
+    detectChapters(text) {
+        // Try to detect chapters by common patterns
+        const chapterPatterns = [
+            /Chapter\s+\d+/gi,
+            /CHAPTER\s+[IVXLCDM]+/gi,
+            /Part\s+\d+/gi,
+            /Book\s+\d+/gi
+        ];
+
+        let chapterMatches = [];
+        
+        for (const pattern of chapterPatterns) {
+            const matches = [...text.matchAll(pattern)];
+            if (matches.length > 0) {
+                chapterMatches = matches;
+                break;
+            }
+        }
+
+        if (chapterMatches.length > 0) {
+            this.chapters = [];
+            
+            for (let i = 0; i < chapterMatches.length; i++) {
+                const startIndex = chapterMatches[i].index;
+                const endIndex = i < chapterMatches.length - 1 
+                    ? chapterMatches[i + 1].index 
+                    : text.length;
+                
+                const chapterText = text.substring(startIndex, endIndex).trim();
+                const chapterTitle = chapterMatches[i][0];
+                
+                this.chapters.push({
+                    title: chapterTitle,
+                    text: chapterText,
+                    startIndex: startIndex
+                });
+            }
+        } else {
+            // No chapters detected, treat entire text as one chapter
+            this.chapters = [{
+                title: 'Full Text',
+                text: text,
+                startIndex: 0
+            }];
+        }
+
+        // Paginate each chapter
+        this.paginateChapters();
+        this.populateChapterSelect();
+    }
+
+    paginateChapters() {
+        this.pagesPerChapter = [];
+        
+        for (const chapter of this.chapters) {
+            const words = chapter.text.split(/\s+/);
+            const pages = [];
+            
+            for (let i = 0; i < words.length; i += this.wordsPerPage) {
+                const pageWords = words.slice(i, i + this.wordsPerPage);
+                pages.push(pageWords.join(' '));
+            }
+            
+            this.pagesPerChapter.push(pages);
+        }
+    }
+
+    populateChapterSelect() {
+        this.chapterSelect.innerHTML = '';
+        
+        this.chapters.forEach((chapter, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = chapter.title;
+            this.chapterSelect.appendChild(option);
+        });
+        
+        this.chapterSelect.value = this.currentChapterIndex;
+        this.chapterNav.style.display = this.chapters.length > 1 ? 'flex' : 'none';
+    }
+
+    renderCurrentPage() {
+        const pages = this.pagesPerChapter[this.currentChapterIndex];
+        if (!pages || pages.length === 0) return;
+        
+        const pageText = pages[this.currentPage] || '';
+        
+        // Clear and render
+        this.readerContent.innerHTML = '';
+        
+        // Split into sentences for highlighting
+        const sentences = pageText.match(/[^.!?]+[.!?]+/g) || [pageText];
+        
+        sentences.forEach((sentence, index) => {
+            const span = document.createElement('span');
+            span.className = 'sentence';
+            span.setAttribute('data-sentence-index', index);
+            span.textContent = sentence + ' ';
+            this.readerContent.appendChild(span);
+        });
+        
+        // Update page info
+        this.pageInfo.textContent = `Page ${this.currentPage + 1} of ${pages.length}`;
+        
+        // Update navigation buttons
+        this.prevPageBtn.disabled = this.currentPage === 0;
+        this.nextPageBtn.disabled = this.currentPage === pages.length - 1;
+        this.prevChapterBtn.disabled = this.currentChapterIndex === 0;
+        this.nextChapterBtn.disabled = this.currentChapterIndex === this.chapters.length - 1;
+        
+        // Save progress
+        this.saveProgress();
+    }
+
+    previousPage() {
+        if (this.currentPage > 0) {
+            this.currentPage--;
+            this.renderCurrentPage();
+        }
+    }
+
+    nextPage() {
+        const pages = this.pagesPerChapter[this.currentChapterIndex];
+        if (this.currentPage < pages.length - 1) {
+            this.currentPage++;
+            this.renderCurrentPage();
+        } else {
+            // Auto-advance to next chapter
+            if (this.currentChapterIndex < this.chapters.length - 1) {
+                this.nextChapter();
+            }
+        }
+    }
+
+    previousChapter() {
+        if (this.currentChapterIndex > 0) {
+            this.currentChapterIndex--;
+            this.currentPage = 0;
+            this.chapterSelect.value = this.currentChapterIndex;
+            this.renderCurrentPage();
+        }
+    }
+
+    nextChapter() {
+        if (this.currentChapterIndex < this.chapters.length - 1) {
+            this.currentChapterIndex++;
+            this.currentPage = 0;
+            this.chapterSelect.value = this.currentChapterIndex;
+            this.renderCurrentPage();
+        }
+    }
+
+    goToChapter(chapterIndex) {
+        if (chapterIndex >= 0 && chapterIndex < this.chapters.length) {
+            this.currentChapterIndex = chapterIndex;
+            this.currentPage = 0;
+            this.renderCurrentPage();
+        }
+    }
+
+    saveProgress() {
+        const progress = {
+            fileName: this.fileName,
+            chapter: this.currentChapterIndex,
+            page: this.currentPage,
+            timestamp: Date.now()
+        };
+        
+        localStorage.setItem(`novel-reader-progress-${this.fileName}`, JSON.stringify(progress));
+    }
+
+    getSavedProgress(filename) {
+        const saved = localStorage.getItem(`novel-reader-progress-${filename}`);
+        return saved ? JSON.parse(saved) : null;
+    }
+
+    loadSavedProgress() {
+        // This will be called when loading a file
+    }
+
     splitIntoSentences(text) {
-        // Split by sentence-ending punctuation
         const sentences = text
             .split(/(?<=[.!?])\s+/)
             .map(s => s.trim())
@@ -546,15 +618,8 @@ class NovelReader {
         this.controlsSection.classList.add('active');
         this.fileNameDisplay.classList.add('active');
         
-        // Show preview of text
-        const previewLength = 1000;
-        const preview = this.novelText.substring(0, previewLength);
-        this.textDisplay.textContent = preview + 
-            (this.novelText.length > previewLength ? '...' : '');
-        
         this.fileNameDisplay.textContent = '📄 ' + this.fileName;
-        
-        this.progressText.textContent = `Ready to read (${this.sentences.length} sentences)`;
+        this.progressText.textContent = `Ready to read (${this.chapters.length} chapters)`;
     }
 
     showImportSection() {
@@ -591,29 +656,17 @@ class NovelReader {
     }
 
     loadSample() {
-        const sampleText = `Chapter One: The Beginning
+        const sampleText = `Chapter 1: The Beginning
 
-It was a bright cold day in April, and the clocks were striking thirteen. The protagonist walked down the cobblestone street, lost in thought about the adventures that lay ahead.
+It was a bright cold day in April, and the clocks were striking thirteen. The protagonist walked down the cobblestone street, lost in thought about the adventures that lay ahead. The morning sun cast long shadows across the pavement.
 
-The morning sun cast long shadows across the pavement, and a gentle breeze rustled through the trees. Everything seemed peaceful, yet there was an undercurrent of excitement in the air.
+Chapter 2: The Discovery
 
-As they turned the corner, something unexpected caught their eye. A small bookshop with an old wooden sign creaked in the wind. The windows were dusty, but through them, countless volumes promised untold stories and knowledge.
+The shop was much larger than it appeared from the outside. Rows upon rows of bookshelves stretched into the dim recesses of the building. Each shelf seemed to lean slightly, as if weighted down by the centuries of knowledge they contained.
 
-Without hesitation, they pushed open the heavy door. A bell chimed softly overhead, and the musty smell of old paper filled their nostrils. This was the beginning of something extraordinary.
+Chapter 3: The Journey
 
-The shopkeeper looked up from behind a towering stack of books, smiled knowingly, and said, "We've been expecting you."
-
-Chapter Two: The Discovery
-
-The shop was much larger than it appeared from the outside. Rows upon rows of bookshelves stretched into the dim recesses of the building, creating a labyrinth of literary treasures. Each shelf seemed to lean slightly, as if weighted down by the centuries of knowledge they contained.
-
-"Welcome," the shopkeeper said, his voice warm and inviting. "I'm Mr. Wordsworth. What brings you to my humble establishment?"
-
-The protagonist hesitated, unsure how to explain the inexplicable pull that had drawn them to this place. "I'm not entirely certain," they admitted. "I was just walking by when something made me stop."
-
-Mr. Wordsworth nodded sagely, as if this was the most natural explanation in the world. "Ah yes, the books called to you. They have a way of doing that with special individuals."
-
-He gestured toward the endless aisles. "Feel free to browse. I suspect you'll know the right book when you see it."`;
+Days turned into weeks as the adventure continued. New friends were made, challenges were overcome, and the protagonist grew wiser with each passing moment.`;
 
         this.loadText(sampleText, 'Sample Novel');
     }
@@ -670,6 +723,7 @@ He gestured toward the endless aisles. "Feel free to browse. I suspect you'll kn
         this.playBtn.textContent = '▶️';
         this.stopBtn.disabled = true;
         this.skipBtn.disabled = true;
+        this.clearHighlights();
         this.updateProgress();
         this.progressText.textContent = 'Stopped';
     }
@@ -694,8 +748,11 @@ He gestured toward the endless aisles. "Feel free to browse. I suspect you'll kn
         }
 
         const sentence = this.sentences[this.currentSentenceIndex];
-        const utterance = new SpeechSynthesisUtterance(sentence);
         
+        // Highlight current sentence
+        this.highlightCurrentSentence(sentence);
+        
+        const utterance = new SpeechSynthesisUtterance(sentence);
         utterance.rate = this.speed;
         utterance.pitch = this.pitch;
         utterance.voice = this.selectedVoice;
@@ -705,7 +762,9 @@ He gestured toward the endless aisles. "Feel free to browse. I suspect you'll kn
                 this.currentSentenceIndex++;
                 this.updateProgress();
                 
-                // Small delay between sentences
+                // Auto page turn if needed
+                this.checkAndTurnPage();
+                
                 setTimeout(() => {
                     if (this.isReading) {
                         this.speakCurrentSentence();
@@ -717,12 +776,41 @@ He gestured toward the endless aisles. "Feel free to browse. I suspect you'll kn
         utterance.onerror = (event) => {
             console.error('Speech error:', event);
             this.stopReading();
-            this.progressText.textContent = 'Error occurred';
         };
 
         this.currentUtterance = utterance;
         this.synth.speak(utterance);
         this.updateProgressText();
+    }
+
+    highlightCurrentSentence(sentence) {
+        // Clear previous highlights
+        this.clearHighlights();
+        
+        // Find and highlight current sentence in the page
+        const sentenceSpans = this.readerContent.querySelectorAll('.sentence');
+        sentenceSpans.forEach(span => {
+            if (span.textContent.trim().includes(sentence.trim().substring(0, 50))) {
+                span.classList.add('highlighted');
+            }
+        });
+    }
+
+    clearHighlights() {
+        const highlighted = this.readerContent.querySelectorAll('.highlighted');
+        highlighted.forEach(el => el.classList.remove('highlighted'));
+    }
+
+    checkAndTurnPage() {
+        // Check if we need to turn the page based on current sentence
+        // This is a simplified version - could be more sophisticated
+        const currentPageText = this.pagesPerChapter[this.currentChapterIndex][this.currentPage];
+        const currentSentence = this.sentences[this.currentSentenceIndex];
+        
+        if (!currentPageText.includes(currentSentence) && 
+            this.currentPage < this.pagesPerChapter[this.currentChapterIndex].length - 1) {
+            this.nextPage();
+        }
     }
 
     updateProgress() {
@@ -735,18 +823,18 @@ He gestured toward the endless aisles. "Feel free to browse. I suspect you'll kn
         this.progressFill.style.width = progress + '%';
         
         if (!this.isReading && !this.isPaused) {
-            this.progressText.textContent = `Ready to read (${this.sentences.length} sentences)`;
+            this.progressText.textContent = `Ready to read (${this.chapters.length} chapters)`;
         }
     }
 
     updateProgressText() {
         const progress = Math.round((this.currentSentenceIndex / this.sentences.length) * 100);
-        this.progressText.textContent = `Reading: ${progress}% complete (${this.currentSentenceIndex}/${this.sentences.length})`;
+        this.progressText.textContent = `Reading: ${progress}% complete`;
     }
 }
 
-// Initialize app when DOM is loaded
+// Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     const app = new NovelReader();
-    console.log('Novel Reader initialized with enhanced format support');
+    console.log('Novel Reader initialized with chapter navigation');
 });
