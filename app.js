@@ -239,20 +239,25 @@ class NovelReader {
             throw new Error('PDF library not loaded');
         }
 
-        const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise();
-        
-        let fullText = '';
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-            this.progressText.textContent = `Processing PDF: page ${pageNum} of ${pdf.numPages}...`;
-            const page = await pdf.getPage(pageNum);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(' ');
-            fullText += pageText + '\n\n';
-        }
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+            const pdf = await loadingTask.promise;
+            
+            let fullText = '';
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                this.progressText.textContent = `Processing PDF: page ${pageNum} of ${pdf.numPages}...`;
+                const page = await pdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += pageText + '\n\n';
+            }
 
-        return fullText;
+            return fullText;
+        } catch (error) {
+            console.error('PDF error:', error);
+            throw new Error('Could not read PDF. Try converting to TXT format.');
+        }
     }
 
     async extractTextFromEPUB(file) {
@@ -260,27 +265,36 @@ class NovelReader {
             throw new Error('EPUB library not loaded');
         }
 
-        const arrayBuffer = await file.arrayBuffer();
-        const zip = await JSZip.loadAsync(arrayBuffer);
-        
-        let fullText = '';
-        const htmlFiles = [];
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const zip = await JSZip.loadAsync(arrayBuffer);
+            
+            let fullText = '';
+            const htmlFiles = [];
 
-        zip.forEach((relativePath, zipEntry) => {
-            if (relativePath.match(/\.(html|xhtml|htm)$/i) && !zipEntry.dir) {
-                htmlFiles.push(relativePath);
+            zip.forEach((relativePath, zipEntry) => {
+                if (relativePath.match(/\.(html|xhtml|htm)$/i) && !zipEntry.dir) {
+                    htmlFiles.push(relativePath);
+                }
+            });
+
+            htmlFiles.sort();
+
+            for (const fileName of htmlFiles) {
+                const content = await zip.file(fileName).async('string');
+                const plainText = this.stripHTML(content);
+                fullText += plainText + '\n\n';
             }
-        });
 
-        htmlFiles.sort();
+            if (!fullText.trim()) {
+                throw new Error('No text found in EPUB');
+            }
 
-        for (const fileName of htmlFiles) {
-            const content = await zip.file(fileName).async('string');
-            const plainText = this.stripHTML(content);
-            fullText += plainText + '\n\n';
+            return fullText;
+        } catch (error) {
+            console.error('EPUB error:', error);
+            throw new Error('Could not read EPUB. Try converting to TXT format.');
         }
-
-        return fullText;
     }
 
     async extractTextFromDOCX(file) {
@@ -288,10 +302,21 @@ class NovelReader {
             throw new Error('DOCX library not loaded');
         }
 
-        const arrayBuffer = await file.arrayBuffer();
-        const zip = await JSZip.loadAsync(arrayBuffer);
-        const documentXML = await zip.file('word/document.xml').async('string');
-        return this.extractTextFromXML(documentXML);
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const zip = await JSZip.loadAsync(arrayBuffer);
+            const documentXML = await zip.file('word/document.xml').async('string');
+            const text = this.extractTextFromXML(documentXML);
+            
+            if (!text.trim()) {
+                throw new Error('No text found in DOCX');
+            }
+            
+            return text;
+        } catch (error) {
+            console.error('DOCX error:', error);
+            throw new Error('Could not read DOCX. Try converting to TXT format.');
+        }
     }
 
     async extractTextFromRTF(file) {
