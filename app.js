@@ -24,13 +24,31 @@ class NovelReader {
         this.speed = 1.0;
         this.pitch = 1.0;
         this.selectedVoice = null;
+        this.voiceEngine = 'responsive'; // 'responsive' or 'browser'
+        this.responsiveVoiceReady = false;
         
         // Initialize
         this.initializeElements();
         this.initializeVoices();
+        this.initializeResponsiveVoice();
         this.attachEventListeners();
         this.initializePDFJS();
         this.loadSavedProgress();
+    }
+
+    initializeResponsiveVoice() {
+        // Check if ResponsiveVoice is loaded
+        if (typeof responsiveVoice !== 'undefined') {
+            responsiveVoice.OnVoiceReady = () => {
+                this.responsiveVoiceReady = true;
+                this.populateVoiceList();
+            };
+            
+            // Set callbacks
+            responsiveVoice.setDefaultVoice = (voice) => {
+                this.selectedVoice = voice;
+            };
+        }
     }
 
     initializePDFJS() {
@@ -77,6 +95,7 @@ class NovelReader {
         this.speedSlider = document.getElementById('speedSlider');
         this.pitchSlider = document.getElementById('pitchSlider');
         this.voiceSelect = document.getElementById('voiceSelect');
+        this.voiceEngineSelect = document.getElementById('voiceEngine');
         this.speedValue = document.getElementById('speedValue');
         this.pitchValue = document.getElementById('pitchValue');
         
@@ -101,30 +120,76 @@ class NovelReader {
     populateVoiceList() {
         this.voiceSelect.innerHTML = '';
         
-        let englishVoices = this.voices.filter(voice => 
-            voice.lang.startsWith('en')
-        );
+        if (this.voiceEngine === 'responsive' && this.responsiveVoiceReady) {
+            // Populate ResponsiveVoice voices
+            const rvVoices = responsiveVoice.getVoices();
+            
+            // Filter for best English voices
+            const englishVoices = rvVoices.filter(v => v.lang.startsWith('en'));
+            const bestVoices = this.selectBestResponsiveVoices(englishVoices);
+            
+            bestVoices.forEach((voice, index) => {
+                const option = document.createElement('option');
+                option.value = voice.name;
+                option.textContent = voice.name;
+                this.voiceSelect.appendChild(option);
+            });
+            
+            if (bestVoices.length > 0) {
+                this.selectedVoice = bestVoices[0].name;
+            }
+        } else {
+            // Use browser voices
+            let englishVoices = this.voices.filter(voice => 
+                voice.lang.startsWith('en')
+            );
 
-        if (englishVoices.length === 0) {
-            this.voiceSelect.innerHTML = '<option>No English voices available</option>';
-            return;
+            if (englishVoices.length === 0) {
+                this.voiceSelect.innerHTML = '<option>No English voices available</option>';
+                return;
+            }
+
+            const qualityVoices = this.selectBestVoices(englishVoices);
+            
+            qualityVoices.forEach((voice, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                const gender = this.guessVoiceGender(voice.name);
+                option.textContent = `${voice.name} ${gender}`;
+                this.voiceSelect.appendChild(option);
+            });
+
+            this.filteredVoices = qualityVoices;
+
+            if (qualityVoices.length > 0) {
+                this.selectedVoice = qualityVoices[0];
+            }
         }
+    }
 
-        const qualityVoices = this.selectBestVoices(englishVoices);
+    selectBestResponsiveVoices(voices) {
+        // Prioritize high-quality ResponsiveVoice voices
+        const premiumNames = [
+            'UK English Female', 'UK English Male', 'US English Female', 'US English Male',
+            'Australian Female', 'Australian Male', 'Irish Female', 'Irish Male'
+        ];
         
-        qualityVoices.forEach((voice, index) => {
-            const option = document.createElement('option');
-            option.value = index;
-            const gender = this.guessVoiceGender(voice.name);
-            option.textContent = `${voice.name} ${gender}`;
-            this.voiceSelect.appendChild(option);
+        let selected = [];
+        
+        premiumNames.forEach(name => {
+            const found = voices.find(v => v.name === name);
+            if (found && selected.length < 8) {
+                selected.push(found);
+            }
         });
-
-        this.filteredVoices = qualityVoices;
-
-        if (qualityVoices.length > 0) {
-            this.selectedVoice = qualityVoices[0];
+        
+        // Add more if needed
+        if (selected.length < 8) {
+            const remaining = voices.filter(v => !selected.includes(v));
+            selected = [...selected, ...remaining.slice(0, 8 - selected.length)];
         }
+        
+        return selected.slice(0, 8);
     }
 
     selectBestVoices(voices) {
@@ -245,11 +310,22 @@ class NovelReader {
             this.pitchValue.textContent = this.pitch.toFixed(1);
         });
         
+        if (this.voiceEngineSelect) {
+            this.voiceEngineSelect.addEventListener('change', (e) => {
+                this.voiceEngine = e.target.value;
+                this.populateVoiceList();
+            });
+        }
+        
         this.voiceSelect.addEventListener('change', (e) => {
-            const voices = this.filteredVoices || this.voices.filter(voice => 
-                voice.lang.startsWith('en')
-            );
-            this.selectedVoice = voices[e.target.value];
+            if (this.voiceEngine === 'responsive') {
+                this.selectedVoice = e.target.value;
+            } else {
+                const voices = this.filteredVoices || this.voices.filter(voice => 
+                    voice.lang.startsWith('en')
+                );
+                this.selectedVoice = voices[e.target.value];
+            }
         });
     }
 
@@ -700,7 +776,11 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     pauseReading() {
-        this.synth.pause();
+        if (this.voiceEngine === 'responsive') {
+            responsiveVoice.pause();
+        } else {
+            this.synth.pause();
+        }
         this.isReading = false;
         this.isPaused = true;
         this.playBtn.textContent = '▶️';
@@ -708,7 +788,11 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     resumeReading() {
-        this.synth.resume();
+        if (this.voiceEngine === 'responsive') {
+            responsiveVoice.resume();
+        } else {
+            this.synth.resume();
+        }
         this.isReading = true;
         this.isPaused = false;
         this.playBtn.textContent = '⏸️';
@@ -716,7 +800,11 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     stopReading() {
-        this.synth.cancel();
+        if (this.voiceEngine === 'responsive') {
+            responsiveVoice.cancel();
+        } else {
+            this.synth.cancel();
+        }
         this.isReading = false;
         this.isPaused = false;
         this.currentSentenceIndex = 0;
@@ -730,7 +818,11 @@ Days turned into weeks as the adventure continued. New friends were made, challe
 
     skipForward() {
         if (this.currentSentenceIndex < this.sentences.length - 1) {
-            this.synth.cancel();
+            if (this.voiceEngine === 'responsive') {
+                responsiveVoice.cancel();
+            } else {
+                this.synth.cancel();
+            }
             this.currentSentenceIndex++;
             this.updateProgress();
             
@@ -752,34 +844,61 @@ Days turned into weeks as the adventure continued. New friends were made, challe
         // Highlight current sentence
         this.highlightCurrentSentence(sentence);
         
-        const utterance = new SpeechSynthesisUtterance(sentence);
-        utterance.rate = this.speed;
-        utterance.pitch = this.pitch;
-        utterance.voice = this.selectedVoice;
-        
-        utterance.onend = () => {
-            if (this.isReading) {
-                this.currentSentenceIndex++;
-                this.updateProgress();
-                
-                // Auto page turn if needed
-                this.checkAndTurnPage();
-                
-                setTimeout(() => {
+        if (this.voiceEngine === 'responsive' && this.responsiveVoiceReady) {
+            // Use ResponsiveVoice
+            const options = {
+                rate: this.speed,
+                pitch: this.pitch,
+                onend: () => {
                     if (this.isReading) {
-                        this.speakCurrentSentence();
+                        this.currentSentenceIndex++;
+                        this.updateProgress();
+                        this.checkAndTurnPage();
+                        
+                        setTimeout(() => {
+                            if (this.isReading) {
+                                this.speakCurrentSentence();
+                            }
+                        }, 200);
                     }
-                }, 200);
-            }
-        };
+                },
+                onerror: (event) => {
+                    console.error('ResponsiveVoice error:', event);
+                    this.stopReading();
+                }
+            };
+            
+            responsiveVoice.speak(sentence, this.selectedVoice, options);
+        } else {
+            // Use browser SpeechSynthesis
+            const utterance = new SpeechSynthesisUtterance(sentence);
+            utterance.rate = this.speed;
+            utterance.pitch = this.pitch;
+            utterance.voice = this.selectedVoice;
+            
+            utterance.onend = () => {
+                if (this.isReading) {
+                    this.currentSentenceIndex++;
+                    this.updateProgress();
+                    this.checkAndTurnPage();
+                    
+                    setTimeout(() => {
+                        if (this.isReading) {
+                            this.speakCurrentSentence();
+                        }
+                    }, 200);
+                }
+            };
 
-        utterance.onerror = (event) => {
-            console.error('Speech error:', event);
-            this.stopReading();
-        };
+            utterance.onerror = (event) => {
+                console.error('Speech error:', event);
+                this.stopReading();
+            };
 
-        this.currentUtterance = utterance;
-        this.synth.speak(utterance);
+            this.currentUtterance = utterance;
+            this.synth.speak(utterance);
+        }
+        
         this.updateProgressText();
     }
 
