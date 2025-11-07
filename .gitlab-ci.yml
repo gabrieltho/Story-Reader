@@ -1,11 +1,11 @@
-yaml   pages:
-     stage: deploy
-     script:
-       - mkdir .public
-       - cp -r * .public
-       - mv .public public
-     artifacts:
-       paths:
-         - public
-     only:
-       - main
+pages:
+  stage: deploy
+  script:
+    - mkdir .public
+    - cp -r * .public
+    - mv .public public
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
