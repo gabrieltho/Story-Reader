@@ -1,4 +1,4 @@
-// Novel Reader App - Enhanced with Chapter Navigation & Progress Tracking
+// Novel Reader App - With ResponsiveVoice TTS
 class NovelReader {
     constructor() {
         this.novelText = '';
@@ -7,47 +7,40 @@ class NovelReader {
         this.currentChapterIndex = 0;
         this.currentPage = 0;
         this.pagesPerChapter = [];
-        this.wordsPerPage = 400; // Adjustable
+        this.wordsPerPage = 400;
         
         this.sentences = [];
         this.currentSentenceIndex = 0;
         this.isReading = false;
         this.isPaused = false;
         
-        // Speech synthesis
-        this.synth = window.speechSynthesis;
-        this.voices = [];
-        this.currentUtterance = null;
-        this.filteredVoices = [];
-        
         // Settings
         this.speed = 1.0;
         this.pitch = 1.0;
-        this.selectedVoice = null;
-        this.voiceEngine = 'responsive'; // 'responsive' or 'browser'
-        this.responsiveVoiceReady = false;
+        this.selectedVoice = 'US English Female';
         
         // Initialize
         this.initializeElements();
-        this.initializeVoices();
-        this.initializeResponsiveVoice();
+        this.waitForResponsiveVoice();
         this.attachEventListeners();
         this.initializePDFJS();
         this.loadSavedProgress();
     }
 
-    initializeResponsiveVoice() {
-        // Check if ResponsiveVoice is loaded
+    waitForResponsiveVoice() {
         if (typeof responsiveVoice !== 'undefined') {
             responsiveVoice.OnVoiceReady = () => {
-                this.responsiveVoiceReady = true;
+                console.log('ResponsiveVoice ready');
                 this.populateVoiceList();
             };
             
-            // Set callbacks
-            responsiveVoice.setDefaultVoice = (voice) => {
-                this.selectedVoice = voice;
-            };
+            // Try immediately if already loaded
+            if (responsiveVoice.voiceSupport()) {
+                this.populateVoiceList();
+            }
+        } else {
+            console.error('ResponsiveVoice not loaded');
+            setTimeout(() => this.waitForResponsiveVoice(), 100);
         }
     }
 
@@ -95,7 +88,6 @@ class NovelReader {
         this.speedSlider = document.getElementById('speedSlider');
         this.pitchSlider = document.getElementById('pitchSlider');
         this.voiceSelect = document.getElementById('voiceSelect');
-        this.voiceEngineSelect = document.getElementById('voiceEngine');
         this.speedValue = document.getElementById('speedValue');
         this.pitchValue = document.getElementById('pitchValue');
         
@@ -104,168 +96,53 @@ class NovelReader {
         this.progressText = document.getElementById('progressText');
     }
 
-    initializeVoices() {
-        const loadVoices = () => {
-            this.voices = this.synth.getVoices();
-            this.populateVoiceList();
-        };
-
-        loadVoices();
-        
-        if (this.synth.onvoiceschanged !== undefined) {
-            this.synth.onvoiceschanged = loadVoices;
-        }
-    }
-
     populateVoiceList() {
         this.voiceSelect.innerHTML = '';
         
-        if (this.voiceEngine === 'responsive' && this.responsiveVoiceReady) {
-            // Populate ResponsiveVoice voices
-            const rvVoices = responsiveVoice.getVoices();
-            
-            // Filter for best English voices
-            const englishVoices = rvVoices.filter(v => v.lang.startsWith('en'));
-            const bestVoices = this.selectBestResponsiveVoices(englishVoices);
-            
-            bestVoices.forEach((voice, index) => {
-                const option = document.createElement('option');
-                option.value = voice.name;
-                option.textContent = voice.name;
-                this.voiceSelect.appendChild(option);
-            });
-            
-            if (bestVoices.length > 0) {
-                this.selectedVoice = bestVoices[0].name;
-            }
-        } else {
-            // Use browser voices
-            let englishVoices = this.voices.filter(voice => 
-                voice.lang.startsWith('en')
-            );
-
-            if (englishVoices.length === 0) {
-                this.voiceSelect.innerHTML = '<option>No English voices available</option>';
-                return;
-            }
-
-            const qualityVoices = this.selectBestVoices(englishVoices);
-            
-            qualityVoices.forEach((voice, index) => {
-                const option = document.createElement('option');
-                option.value = index;
-                const gender = this.guessVoiceGender(voice.name);
-                option.textContent = `${voice.name} ${gender}`;
-                this.voiceSelect.appendChild(option);
-            });
-
-            this.filteredVoices = qualityVoices;
-
-            if (qualityVoices.length > 0) {
-                this.selectedVoice = qualityVoices[0];
-            }
+        if (typeof responsiveVoice === 'undefined') {
+            this.voiceSelect.innerHTML = '<option>Loading voices...</option>';
+            return;
         }
-    }
-
-    selectBestResponsiveVoices(voices) {
-        // Prioritize high-quality ResponsiveVoice voices
-        const premiumNames = [
-            'UK English Female', 'UK English Male', 'US English Female', 'US English Male',
-            'Australian Female', 'Australian Male', 'Irish Female', 'Irish Male'
+        
+        const voices = responsiveVoice.getVoices();
+        const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+        
+        // Prioritize best voices
+        const bestVoices = [
+            'US English Female',
+            'US English Male', 
+            'UK English Female',
+            'UK English Male',
+            'Australian Female',
+            'Australian Male',
+            'Irish Female',
+            'Irish Male'
         ];
         
-        let selected = [];
+        const sortedVoices = [];
         
-        premiumNames.forEach(name => {
-            const found = voices.find(v => v.name === name);
-            if (found && selected.length < 8) {
-                selected.push(found);
+        bestVoices.forEach(name => {
+            const voice = englishVoices.find(v => v.name === name);
+            if (voice) sortedVoices.push(voice);
+        });
+        
+        // Add remaining voices
+        englishVoices.forEach(v => {
+            if (!sortedVoices.find(sv => sv.name === v.name)) {
+                sortedVoices.push(v);
             }
         });
         
-        // Add more if needed
-        if (selected.length < 8) {
-            const remaining = voices.filter(v => !selected.includes(v));
-            selected = [...selected, ...remaining.slice(0, 8 - selected.length)];
-        }
-        
-        return selected.slice(0, 8);
-    }
-
-    selectBestVoices(voices) {
-        const premiumVoices = [
-            'Samantha', 'Alex', 'Victoria', 'Karen', 'Daniel', 'Moira',
-            'Fiona', 'Tessa', 'Ava', 'Nicky', 'Susan', 'Zoe',
-            'Google US English', 'Google UK English Female', 'Google UK English Male',
-            'Microsoft David', 'Microsoft Zira', 'Microsoft Mark'
-        ];
-
-        let selectedVoices = [];
-        
-        premiumVoices.forEach(premiumName => {
-            const found = voices.find(v => v.name.includes(premiumName));
-            if (found && selectedVoices.length < 8) {
-                selectedVoices.push(found);
-            }
+        sortedVoices.slice(0, 10).forEach(voice => {
+            const option = document.createElement('option');
+            option.value = voice.name;
+            option.textContent = voice.name;
+            this.voiceSelect.appendChild(option);
         });
-
-        if (selectedVoices.length < 8) {
-            const remaining = voices.filter(v => !selectedVoices.includes(v));
-            const betterRemaining = remaining.filter(v => 
-                !v.name.toLowerCase().includes('compact')
-            );
-            const toAdd = betterRemaining.slice(0, 8 - selectedVoices.length);
-            selectedVoices = [...selectedVoices, ...toAdd];
-        }
-
-        return this.balanceGenders(selectedVoices.slice(0, 8));
-    }
-
-    balanceGenders(voices) {
-        const females = [];
-        const males = [];
-        const unknown = [];
-
-        voices.forEach(voice => {
-            const name = voice.name.toLowerCase();
-            
-            if (name.includes('female') || name.includes('samantha') || 
-                name.includes('victoria') || name.includes('karen') ||
-                name.includes('zira') || name.includes('moira')) {
-                females.push(voice);
-            } else if (name.includes('male') || name.includes('alex') || 
-                       name.includes('daniel') || name.includes('david')) {
-                males.push(voice);
-            } else {
-                unknown.push(voice);
-            }
-        });
-
-        const balanced = [
-            ...females.slice(0, 4),
-            ...males.slice(0, 4)
-        ];
-
-        while (balanced.length < 8 && unknown.length > 0) {
-            balanced.push(unknown.shift());
-        }
-
-        return balanced.slice(0, 8);
-    }
-
-    guessVoiceGender(name) {
-        const nameLower = name.toLowerCase();
         
-        if (nameLower.includes('female') || nameLower.includes('samantha') || 
-            nameLower.includes('victoria') || nameLower.includes('karen') ||
-            nameLower.includes('zira')) {
-            return '(Female)';
-        } else if (nameLower.includes('male') || nameLower.includes('alex') || 
-                   nameLower.includes('daniel') || nameLower.includes('david')) {
-            return '(Male)';
+        if (sortedVoices.length > 0) {
+            this.selectedVoice = sortedVoices[0].name;
         }
-        
-        return '';
     }
 
     attachEventListeners() {
@@ -310,22 +187,8 @@ class NovelReader {
             this.pitchValue.textContent = this.pitch.toFixed(1);
         });
         
-        if (this.voiceEngineSelect) {
-            this.voiceEngineSelect.addEventListener('change', (e) => {
-                this.voiceEngine = e.target.value;
-                this.populateVoiceList();
-            });
-        }
-        
         this.voiceSelect.addEventListener('change', (e) => {
-            if (this.voiceEngine === 'responsive') {
-                this.selectedVoice = e.target.value;
-            } else {
-                const voices = this.filteredVoices || this.voices.filter(voice => 
-                    voice.lang.startsWith('en')
-                );
-                this.selectedVoice = voices[e.target.value];
-            }
+            this.selectedVoice = e.target.value;
         });
     }
 
@@ -477,14 +340,10 @@ class NovelReader {
         this.novelText = text;
         this.fileName = filename;
         
-        // Detect and split chapters
         this.detectChapters(text);
-        
-        // Split into sentences for speech
         this.sentences = this.splitIntoSentences(text);
         this.currentSentenceIndex = 0;
         
-        // Load saved progress if available
         const saved = this.getSavedProgress(filename);
         if (saved) {
             this.currentChapterIndex = saved.chapter;
@@ -500,7 +359,6 @@ class NovelReader {
     }
 
     detectChapters(text) {
-        // Try to detect chapters by common patterns
         const chapterPatterns = [
             /Chapter\s+\d+/gi,
             /CHAPTER\s+[IVXLCDM]+/gi,
@@ -537,7 +395,6 @@ class NovelReader {
                 });
             }
         } else {
-            // No chapters detected, treat entire text as one chapter
             this.chapters = [{
                 title: 'Full Text',
                 text: text,
@@ -545,7 +402,6 @@ class NovelReader {
             }];
         }
 
-        // Paginate each chapter
         this.paginateChapters();
         this.populateChapterSelect();
     }
@@ -586,10 +442,8 @@ class NovelReader {
         
         const pageText = pages[this.currentPage] || '';
         
-        // Clear and render
         this.readerContent.innerHTML = '';
         
-        // Split into sentences for highlighting
         const sentences = pageText.match(/[^.!?]+[.!?]+/g) || [pageText];
         
         sentences.forEach((sentence, index) => {
@@ -600,16 +454,13 @@ class NovelReader {
             this.readerContent.appendChild(span);
         });
         
-        // Update page info
         this.pageInfo.textContent = `Page ${this.currentPage + 1} of ${pages.length}`;
         
-        // Update navigation buttons
         this.prevPageBtn.disabled = this.currentPage === 0;
         this.nextPageBtn.disabled = this.currentPage === pages.length - 1;
         this.prevChapterBtn.disabled = this.currentChapterIndex === 0;
         this.nextChapterBtn.disabled = this.currentChapterIndex === this.chapters.length - 1;
         
-        // Save progress
         this.saveProgress();
     }
 
@@ -626,7 +477,6 @@ class NovelReader {
             this.currentPage++;
             this.renderCurrentPage();
         } else {
-            // Auto-advance to next chapter
             if (this.currentChapterIndex < this.chapters.length - 1) {
                 this.nextChapter();
             }
@@ -676,7 +526,7 @@ class NovelReader {
     }
 
     loadSavedProgress() {
-        // This will be called when loading a file
+        // Called when loading a file
     }
 
     splitIntoSentences(text) {
@@ -776,11 +626,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     pauseReading() {
-        if (this.voiceEngine === 'responsive') {
-            responsiveVoice.pause();
-        } else {
-            this.synth.pause();
-        }
+        responsiveVoice.pause();
         this.isReading = false;
         this.isPaused = true;
         this.playBtn.textContent = '▶️';
@@ -788,11 +634,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     resumeReading() {
-        if (this.voiceEngine === 'responsive') {
-            responsiveVoice.resume();
-        } else {
-            this.synth.resume();
-        }
+        responsiveVoice.resume();
         this.isReading = true;
         this.isPaused = false;
         this.playBtn.textContent = '⏸️';
@@ -800,11 +642,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     stopReading() {
-        if (this.voiceEngine === 'responsive') {
-            responsiveVoice.cancel();
-        } else {
-            this.synth.cancel();
-        }
+        responsiveVoice.cancel();
         this.isReading = false;
         this.isPaused = false;
         this.currentSentenceIndex = 0;
@@ -818,11 +656,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
 
     skipForward() {
         if (this.currentSentenceIndex < this.sentences.length - 1) {
-            if (this.voiceEngine === 'responsive') {
-                responsiveVoice.cancel();
-            } else {
-                this.synth.cancel();
-            }
+            responsiveVoice.cancel();
             this.currentSentenceIndex++;
             this.updateProgress();
             
@@ -841,42 +675,12 @@ Days turned into weeks as the adventure continued. New friends were made, challe
 
         const sentence = this.sentences[this.currentSentenceIndex];
         
-        // Highlight current sentence
         this.highlightCurrentSentence(sentence);
         
-        if (this.voiceEngine === 'responsive' && this.responsiveVoiceReady) {
-            // Use ResponsiveVoice
-            const options = {
-                rate: this.speed,
-                pitch: this.pitch,
-                onend: () => {
-                    if (this.isReading) {
-                        this.currentSentenceIndex++;
-                        this.updateProgress();
-                        this.checkAndTurnPage();
-                        
-                        setTimeout(() => {
-                            if (this.isReading) {
-                                this.speakCurrentSentence();
-                            }
-                        }, 200);
-                    }
-                },
-                onerror: (event) => {
-                    console.error('ResponsiveVoice error:', event);
-                    this.stopReading();
-                }
-            };
-            
-            responsiveVoice.speak(sentence, this.selectedVoice, options);
-        } else {
-            // Use browser SpeechSynthesis
-            const utterance = new SpeechSynthesisUtterance(sentence);
-            utterance.rate = this.speed;
-            utterance.pitch = this.pitch;
-            utterance.voice = this.selectedVoice;
-            
-            utterance.onend = () => {
+        const options = {
+            rate: this.speed,
+            pitch: this.pitch,
+            onend: () => {
                 if (this.isReading) {
                     this.currentSentenceIndex++;
                     this.updateProgress();
@@ -888,25 +692,16 @@ Days turned into weeks as the adventure continued. New friends were made, challe
                         }
                     }, 200);
                 }
-            };
-
-            utterance.onerror = (event) => {
-                console.error('Speech error:', event);
-                this.stopReading();
-            };
-
-            this.currentUtterance = utterance;
-            this.synth.speak(utterance);
-        }
+            }
+        };
         
+        responsiveVoice.speak(sentence, this.selectedVoice, options);
         this.updateProgressText();
     }
 
     highlightCurrentSentence(sentence) {
-        // Clear previous highlights
         this.clearHighlights();
         
-        // Find and highlight current sentence in the page
         const sentenceSpans = this.readerContent.querySelectorAll('.sentence');
         sentenceSpans.forEach(span => {
             if (span.textContent.trim().includes(sentence.trim().substring(0, 50))) {
@@ -921,8 +716,6 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     checkAndTurnPage() {
-        // Check if we need to turn the page based on current sentence
-        // This is a simplified version - could be more sophisticated
         const currentPageText = this.pagesPerChapter[this.currentChapterIndex][this.currentPage];
         const currentSentence = this.sentences[this.currentSentenceIndex];
         
@@ -955,5 +748,5 @@ Days turned into weeks as the adventure continued. New friends were made, challe
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     const app = new NovelReader();
-    console.log('Novel Reader initialized with chapter navigation');
+    console.log('Novel Reader initialized with ResponsiveVoice');
 });
