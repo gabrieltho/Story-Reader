@@ -1,4 +1,4 @@
-// Novel Reader App - With ResponsiveVoice TTS
+// Novel Reader App - With Kokoro Web TTS
 class NovelReader {
     constructor() {
         this.novelText = '';
@@ -13,35 +13,46 @@ class NovelReader {
         this.currentSentenceIndex = 0;
         this.isReading = false;
         this.isPaused = false;
+        this.currentAudio = null;
         
-        // Settings
+        // Kokoro Web API settings
+        this.kokoroAPI = 'https://voice-generator.pages.dev/api/v1/audio/speech';
+        this.selectedVoice = 'af_sky';
         this.speed = 1.0;
-        this.pitch = 1.0;
-        this.selectedVoice = 'US English Female';
         
         // Initialize
         this.initializeElements();
-        this.waitForResponsiveVoice();
+        this.initializeVoices();
         this.attachEventListeners();
         this.initializePDFJS();
         this.loadSavedProgress();
     }
 
-    waitForResponsiveVoice() {
-        if (typeof responsiveVoice !== 'undefined') {
-            responsiveVoice.OnVoiceReady = () => {
-                console.log('ResponsiveVoice ready');
-                this.populateVoiceList();
-            };
-            
-            // Try immediately if already loaded
-            if (responsiveVoice.voiceSupport()) {
-                this.populateVoiceList();
-            }
-        } else {
-            console.error('ResponsiveVoice not loaded');
-            setTimeout(() => this.waitForResponsiveVoice(), 100);
-        }
+    initializeVoices() {
+        // Kokoro Web voices
+        const voices = [
+            { name: 'Sky (Female)', value: 'af_sky' },
+            { name: 'Bella (Female)', value: 'af_bella' },
+            { name: 'Sarah (Female)', value: 'af_sarah' },
+            { name: 'Nicole (Female)', value: 'af_nicole' },
+            { name: 'Heart (Female)', value: 'af_heart' },
+            { name: 'Alloy (Male)', value: 'am_alloy' },
+            { name: 'Adam (Male)', value: 'am_adam' },
+            { name: 'Michael (Male)', value: 'am_michael' },
+            { name: 'Echo (Male)', value: 'am_echo' },
+            { name: 'Liam (Male)', value: 'am_liam' }
+        ];
+        
+        this.voiceSelect.innerHTML = '';
+        voices.forEach(voice => {
+            const option = document.createElement('option');
+            option.value = voice.value;
+            option.textContent = voice.name;
+            this.voiceSelect.appendChild(option);
+        });
+        
+        this.voiceSelect.value = this.selectedVoice;
+        console.log('Kokoro Web voices loaded');
     }
 
     initializePDFJS() {
@@ -94,55 +105,6 @@ class NovelReader {
         // Progress
         this.progressFill = document.getElementById('progressFill');
         this.progressText = document.getElementById('progressText');
-    }
-
-    populateVoiceList() {
-        this.voiceSelect.innerHTML = '';
-        
-        if (typeof responsiveVoice === 'undefined') {
-            this.voiceSelect.innerHTML = '<option>Loading voices...</option>';
-            return;
-        }
-        
-        const voices = responsiveVoice.getVoices();
-        const englishVoices = voices.filter(v => v.lang.startsWith('en'));
-        
-        // Prioritize best voices
-        const bestVoices = [
-            'US English Female',
-            'US English Male', 
-            'UK English Female',
-            'UK English Male',
-            'Australian Female',
-            'Australian Male',
-            'Irish Female',
-            'Irish Male'
-        ];
-        
-        const sortedVoices = [];
-        
-        bestVoices.forEach(name => {
-            const voice = englishVoices.find(v => v.name === name);
-            if (voice) sortedVoices.push(voice);
-        });
-        
-        // Add remaining voices
-        englishVoices.forEach(v => {
-            if (!sortedVoices.find(sv => sv.name === v.name)) {
-                sortedVoices.push(v);
-            }
-        });
-        
-        sortedVoices.slice(0, 10).forEach(voice => {
-            const option = document.createElement('option');
-            option.value = voice.name;
-            option.textContent = voice.name;
-            this.voiceSelect.appendChild(option);
-        });
-        
-        if (sortedVoices.length > 0) {
-            this.selectedVoice = sortedVoices[0].name;
-        }
     }
 
     attachEventListeners() {
@@ -651,7 +613,9 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     pauseReading() {
-        responsiveVoice.pause();
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+        }
         this.isReading = false;
         this.isPaused = true;
         this.playBtn.textContent = '▶️';
@@ -659,7 +623,9 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     resumeReading() {
-        responsiveVoice.resume();
+        if (this.currentAudio) {
+            this.currentAudio.play();
+        }
         this.isReading = true;
         this.isPaused = false;
         this.playBtn.textContent = '⏸️';
@@ -667,7 +633,10 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     stopReading() {
-        responsiveVoice.cancel();
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio = null;
+        }
         this.isReading = false;
         this.isPaused = false;
         this.currentSentenceIndex = 0;
@@ -681,7 +650,10 @@ Days turned into weeks as the adventure continued. New friends were made, challe
 
     skipForward() {
         if (this.currentSentenceIndex < this.sentences.length - 1) {
-            responsiveVoice.cancel();
+            if (this.currentAudio) {
+                this.currentAudio.pause();
+                this.currentAudio = null;
+            }
             this.currentSentenceIndex++;
             this.updateProgress();
             
@@ -691,7 +663,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
         }
     }
 
-    speakCurrentSentence() {
+    async speakCurrentSentence() {
         if (this.currentSentenceIndex >= this.sentences.length) {
             this.stopReading();
             this.progressText.textContent = 'Finished reading';
@@ -702,10 +674,35 @@ Days turned into weeks as the adventure continued. New friends were made, challe
         
         this.highlightCurrentSentence(sentence);
         
-        const options = {
-            rate: this.speed,
-            pitch: this.pitch,
-            onend: () => {
+        try {
+            // Call Kokoro Web API
+            const response = await fetch(this.kokoroAPI, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model: 'kokoro-v0_19',
+                    input: sentence,
+                    voice: this.selectedVoice,
+                    speed: this.speed
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
+            
+            // Get audio blob
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            // Create and play audio
+            this.currentAudio = new Audio(audioUrl);
+            
+            // Set up audio event listeners
+            this.currentAudio.addEventListener('ended', () => {
+                URL.revokeObjectURL(audioUrl); // Clean up
                 if (this.isReading) {
                     this.currentSentenceIndex++;
                     this.updateProgress();
@@ -717,11 +714,16 @@ Days turned into weeks as the adventure continued. New friends were made, challe
                         }
                     }, 200);
                 }
-            }
-        };
-        
-        responsiveVoice.speak(sentence, this.selectedVoice, options);
-        this.updateProgressText();
+            });
+            
+            this.currentAudio.play();
+            this.updateProgressText();
+            
+        } catch (error) {
+            console.error('TTS Error:', error);
+            this.progressText.textContent = 'Error: ' + error.message;
+            this.stopReading();
+        }
     }
 
     highlightCurrentSentence(sentence) {
