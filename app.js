@@ -1,4 +1,4 @@
-// Novel Reader App - With TTS.rocks
+// Novel Reader App - With TTS.rocks Kokoro engine
 class NovelReader {
     constructor() {
         this.novelText = '';
@@ -13,11 +13,11 @@ class NovelReader {
         this.currentSentenceIndex = 0;
         this.isReading = false;
         this.isPaused = false;
-        this.currentAudio = null;
+        this.kokoroInitialized = false;
         
         // TTS.rocks settings
         this.speed = 1.0;
-        this.selectedVoice = 'default';
+        this.selectedVoice = 'af_sky';
         
         // Initialize
         this.initializeElements();
@@ -28,19 +28,32 @@ class NovelReader {
     }
 
     async initializeTTS() {
-        // Initialize TTS.rocks
+        // Initialize TTS.rocks with Kokoro
         window.TTS = window.TTS || {};
-        TTS.TTSProvider = 'browser'; // Start with browser TTS
+        TTS.TTSProvider = 'kokoro';
+        TTS.rate = this.speed;
         
-        // Set up simple voice list for browser TTS
+        this.progressText.textContent = 'Loading voice engine...';
+        
+        // Set up voice list
         this.populateVoices();
         
-        console.log('TTS.rocks initialized');
+        console.log('TTS.rocks with Kokoro engine ready');
     }
     
     populateVoices() {
+        // Kokoro voices from TTS.rocks
         const voices = [
-            { name: 'Browser Default', value: 'default' }
+            { name: 'Sky (Female)', value: 'af_sky' },
+            { name: 'Bella (Female)', value: 'af_bella' },
+            { name: 'Sarah (Female)', value: 'af_sarah' },
+            { name: 'Nicole (Female)', value: 'af_nicole' },
+            { name: 'Heart (Female)', value: 'af_heart' },
+            { name: 'Alloy (Male)', value: 'am_alloy' },
+            { name: 'Adam (Male)', value: 'am_adam' },
+            { name: 'Michael (Male)', value: 'am_michael' },
+            { name: 'Echo (Male)', value: 'am_echo' },
+            { name: 'Liam (Male)', value: 'am_liam' }
         ];
         
         this.voiceSelect.innerHTML = '';
@@ -612,7 +625,8 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     pauseReading() {
-        window.speechSynthesis.pause();
+        // Kokoro doesn't support pause/resume, so we just stop
+        TTS.stopKokoro && TTS.stopKokoro();
         this.isReading = false;
         this.isPaused = true;
         this.playBtn.textContent = '▶️';
@@ -620,15 +634,15 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     resumeReading() {
-        window.speechSynthesis.resume();
+        // Resume by starting from current sentence
         this.isReading = true;
         this.isPaused = false;
         this.playBtn.textContent = '⏸️';
-        this.updateProgressText();
+        this.speakCurrentSentence();
     }
 
     stopReading() {
-        window.speechSynthesis.cancel();
+        TTS.stopKokoro && TTS.stopKokoro();
         this.isReading = false;
         this.isPaused = false;
         this.currentSentenceIndex = 0;
@@ -642,7 +656,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
 
     skipForward() {
         if (this.currentSentenceIndex < this.sentences.length - 1) {
-            window.speechSynthesis.cancel();
+            TTS.stopKokoro && TTS.stopKokoro();
             this.currentSentenceIndex++;
             this.updateProgress();
             
@@ -664,29 +678,33 @@ Days turned into weeks as the adventure continued. New friends were made, challe
         this.highlightCurrentSentence(sentence);
         
         try {
-            // Use TTS.rocks speak function
+            // Initialize Kokoro if not already done
+            if (!this.kokoroInitialized) {
+                this.progressText.textContent = 'Loading voice model (first time only)...';
+                await TTS.initKokoro();
+                this.kokoroInitialized = true;
+            }
+            
+            // Set voice and rate
+            TTS.voiceKokoro = this.selectedVoice;
             TTS.rate = this.speed;
             
-            // Set up a callback for when speech ends
-            const checkEnd = setInterval(() => {
-                if (!window.speechSynthesis.speaking) {
-                    clearInterval(checkEnd);
-                    if (this.isReading) {
-                        this.currentSentenceIndex++;
-                        this.updateProgress();
-                        this.checkAndTurnPage();
-                        
-                        setTimeout(() => {
-                            if (this.isReading) {
-                                this.speakCurrentSentence();
-                            }
-                        }, 200);
-                    }
-                }
-            }, 100);
+            // Speak using Kokoro TTS
+            await TTS.kokoroTTS(sentence);
             
-            // Speak the sentence
-            TTS.speak(sentence, true);
+            // After speech finishes, continue to next sentence
+            if (this.isReading) {
+                this.currentSentenceIndex++;
+                this.updateProgress();
+                this.checkAndTurnPage();
+                
+                setTimeout(() => {
+                    if (this.isReading) {
+                        this.speakCurrentSentence();
+                    }
+                }, 200);
+            }
+            
             this.updateProgressText();
             
         } catch (error) {
