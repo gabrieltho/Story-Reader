@@ -1,4 +1,4 @@
-// Novel Reader App - With Kokoro Web TTS
+// Novel Reader App - With TTS.rocks
 class NovelReader {
     constructor() {
         this.novelText = '';
@@ -15,32 +15,32 @@ class NovelReader {
         this.isPaused = false;
         this.currentAudio = null;
         
-        // Kokoro Web API settings
-        this.kokoroAPI = 'https://voice-generator.pages.dev/api/v1/audio/speech';
-        this.selectedVoice = 'af_sky';
+        // TTS.rocks settings
         this.speed = 1.0;
+        this.selectedVoice = 'default';
         
         // Initialize
         this.initializeElements();
-        this.initializeVoices();
+        this.initializeTTS();
         this.attachEventListeners();
         this.initializePDFJS();
         this.loadSavedProgress();
     }
 
-    initializeVoices() {
-        // Kokoro Web voices
+    async initializeTTS() {
+        // Initialize TTS.rocks
+        window.TTS = window.TTS || {};
+        TTS.TTSProvider = 'browser'; // Start with browser TTS
+        
+        // Set up simple voice list for browser TTS
+        this.populateVoices();
+        
+        console.log('TTS.rocks initialized');
+    }
+    
+    populateVoices() {
         const voices = [
-            { name: 'Sky (Female)', value: 'af_sky' },
-            { name: 'Bella (Female)', value: 'af_bella' },
-            { name: 'Sarah (Female)', value: 'af_sarah' },
-            { name: 'Nicole (Female)', value: 'af_nicole' },
-            { name: 'Heart (Female)', value: 'af_heart' },
-            { name: 'Alloy (Male)', value: 'am_alloy' },
-            { name: 'Adam (Male)', value: 'am_adam' },
-            { name: 'Michael (Male)', value: 'am_michael' },
-            { name: 'Echo (Male)', value: 'am_echo' },
-            { name: 'Liam (Male)', value: 'am_liam' }
+            { name: 'Browser Default', value: 'default' }
         ];
         
         this.voiceSelect.innerHTML = '';
@@ -52,7 +52,6 @@ class NovelReader {
         });
         
         this.voiceSelect.value = this.selectedVoice;
-        console.log('Kokoro Web voices loaded');
     }
 
     initializePDFJS() {
@@ -613,9 +612,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     pauseReading() {
-        if (this.currentAudio) {
-            this.currentAudio.pause();
-        }
+        window.speechSynthesis.pause();
         this.isReading = false;
         this.isPaused = true;
         this.playBtn.textContent = '▶️';
@@ -623,9 +620,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     resumeReading() {
-        if (this.currentAudio) {
-            this.currentAudio.play();
-        }
+        window.speechSynthesis.resume();
         this.isReading = true;
         this.isPaused = false;
         this.playBtn.textContent = '⏸️';
@@ -633,10 +628,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
     }
 
     stopReading() {
-        if (this.currentAudio) {
-            this.currentAudio.pause();
-            this.currentAudio = null;
-        }
+        window.speechSynthesis.cancel();
         this.isReading = false;
         this.isPaused = false;
         this.currentSentenceIndex = 0;
@@ -650,10 +642,7 @@ Days turned into weeks as the adventure continued. New friends were made, challe
 
     skipForward() {
         if (this.currentSentenceIndex < this.sentences.length - 1) {
-            if (this.currentAudio) {
-                this.currentAudio.pause();
-                this.currentAudio = null;
-            }
+            window.speechSynthesis.cancel();
             this.currentSentenceIndex++;
             this.updateProgress();
             
@@ -675,48 +664,29 @@ Days turned into weeks as the adventure continued. New friends were made, challe
         this.highlightCurrentSentence(sentence);
         
         try {
-            // Call Kokoro Web API
-            const response = await fetch(this.kokoroAPI, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: 'kokoro-v0_19',
-                    input: sentence,
-                    voice: this.selectedVoice,
-                    speed: this.speed
-                })
-            });
+            // Use TTS.rocks speak function
+            TTS.rate = this.speed;
             
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-            
-            // Get audio blob
-            const audioBlob = await response.blob();
-            const audioUrl = URL.createObjectURL(audioBlob);
-            
-            // Create and play audio
-            this.currentAudio = new Audio(audioUrl);
-            
-            // Set up audio event listeners
-            this.currentAudio.addEventListener('ended', () => {
-                URL.revokeObjectURL(audioUrl); // Clean up
-                if (this.isReading) {
-                    this.currentSentenceIndex++;
-                    this.updateProgress();
-                    this.checkAndTurnPage();
-                    
-                    setTimeout(() => {
-                        if (this.isReading) {
-                            this.speakCurrentSentence();
-                        }
-                    }, 200);
+            // Set up a callback for when speech ends
+            const checkEnd = setInterval(() => {
+                if (!window.speechSynthesis.speaking) {
+                    clearInterval(checkEnd);
+                    if (this.isReading) {
+                        this.currentSentenceIndex++;
+                        this.updateProgress();
+                        this.checkAndTurnPage();
+                        
+                        setTimeout(() => {
+                            if (this.isReading) {
+                                this.speakCurrentSentence();
+                            }
+                        }, 200);
+                    }
                 }
-            });
+            }, 100);
             
-            this.currentAudio.play();
+            // Speak the sentence
+            TTS.speak(sentence, true);
             this.updateProgressText();
             
         } catch (error) {
